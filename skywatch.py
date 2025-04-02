@@ -2,7 +2,9 @@ import requests
 import fnmatch
 import time
 import csv
-
+import smtplib
+from email.message import EmailMessage
+from emailToSMSConfig import senderEmail, gatewayAddress, appKey
 # Enter in your Bot Token and the Chat ID of the chat you want the alerts sent to.
 TELEGRAM_BOT_TOKEN = ""
 TELEGRAM_CHAT_ID = ""
@@ -18,9 +20,23 @@ SQUAWK_MEANINGS = {
     "6400": "NORAD",
     "7777": "Millitary intercept",
     "0000": "discrete VFR operations",
-    "1277": "Search & Rescue"
+    "1277": "Search & Rescue",
+    "4040": "TEST"
 }
+def send_email_sms(alert):
+    msg = EmailMessage()
+    msg.set_content(alert)
 
+    msg['From'] = senderEmail
+    msg['To'] = gatewayAddress
+    msg['Subject'] = 'Flight Tracking Alert'
+
+    server = smtplib.SMTP('smtp.gmail.com', 587)
+    server.starttls()
+    server.login(senderEmail, appKey)
+
+    server.send_message(msg)
+    server.quit()
 
 def load_watchlist():
     watchlist = {}
@@ -141,8 +157,8 @@ def main():
                                     f"Ground Speed: {aircraft.get('gs', 'N/A')} knots\n"
                                     f"Track: {aircraft.get('track', 'N/A')}"
                                 )
-
-                            status_code = send_telegram_alert(message)
+                            send_email_sms(message)
+                            # status_code = send_telegram_alert(message)
                             if status_code == 200:
                                 message_lines = message.split('\n')[:3]
                                 for line in message_lines:
