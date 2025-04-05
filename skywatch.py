@@ -4,10 +4,15 @@ import time
 import csv
 import smtplib
 from email.message import EmailMessage
-from emailToSMSConfig import senderEmail, gatewayAddress, appKey
+from emailToSMSConfig import senderEmail, gatewayAddress, appKey, healthCheckEmail
+import os
+import datetime
+import pytz
 # Enter in your Bot Token and the Chat ID of the chat you want the alerts sent to.
 TELEGRAM_BOT_TOKEN = ""
 TELEGRAM_CHAT_ID = ""
+
+LAST_SENT_HEALTH_CHECK = int(time.time())
 
 # Add or remove these as needed
 SQUAWK_MEANINGS = {
@@ -21,15 +26,18 @@ SQUAWK_MEANINGS = {
     "7777": "Millitary intercept",
     "0000": "discrete VFR operations",
     "1277": "Search & Rescue",
-    "4040": "TEST"
+    '8698': "Chris's Birthday Squawk!!",
+    '0331': "Yuki's Birthday Squawk!!"
 }
-def send_email_sms(alert):
+
+
+def send_email_alert(email, subject, content):
     msg = EmailMessage()
-    msg.set_content(alert)
+    msg.set_content(content)
 
     msg['From'] = senderEmail
-    msg['To'] = gatewayAddress
-    msg['Subject'] = 'Flight Tracking Alert'
+    msg['To'] = email
+    msg['Subject'] =subject
 
     server = smtplib.SMTP('smtp.gmail.com', 587)
     server.starttls()
@@ -90,7 +98,6 @@ def main():
 
     while True:
         aircraft_data = get_aircraft_data()
-
         for aircraft in aircraft_data:
             hex_code = aircraft['hex'].upper()
             flight = aircraft.get('flight', '').strip().upper()
@@ -99,6 +106,7 @@ def main():
             # Alert on specific squawk codes
             if squawk in SQUAWK_MEANINGS and (
                     hex_code not in squawk_alert_history or time.time() - squawk_alert_history[hex_code] >= 3600):
+                print("SQUAK MATCH")
                 squawk_alert_history[hex_code] = time.time()
                 squawk_meaning = SQUAWK_MEANINGS[squawk]
 
@@ -117,14 +125,7 @@ def main():
                         f"Flight: {aircraft.get('flight', 'N/A')}\nAltitude: {aircraft.get('alt_geom', 'N/A')} ft\n"
                         f"Ground Speed: {aircraft.get('gs', 'N/A')} knots\nTrack: {aircraft.get('track', 'N/A')}"
                     )
-
-                status_code = send_telegram_alert(message)
-                if status_code == 200:
-                    message_lines = message.split('\n')[:3]
-                    for line in message_lines:
-                        print(line)
-                else:
-                    print(f"Failed to send squawk alert. Status Code: {status_code}")
+                send_email_alert(gatewayAddress, "SQUAWK ALERT!", message)
 
             # Alert on items in the watchlist
             for entry in watchlist:
@@ -159,12 +160,12 @@ def main():
                                 )
                             send_email_sms(message)
                             # status_code = send_telegram_alert(message)
-                            if status_code == 200:
-                                message_lines = message.split('\n')[:3]
-                                for line in message_lines:
-                                    print(line)
-                            else:
-                                print(f"Failed to send watchlist alert. Status Code: {status_code}")
+                            # if status_code == 200:
+                            #     message_lines = message.split('\n')[:3]
+                            #     for line in message_lines:
+                            #         print(line)
+                            # else:
+                            #     print(f"Failed to send watchlist alert. Status Code: {status_code}")
                 elif hex_code == entry or flight == entry:
                     if hex_code not in watchlist_alert_history or time.time() - watchlist_alert_history[hex_code] >= 3600:
                         watchlist_alert_history[hex_code] = time.time()
@@ -191,15 +192,24 @@ def main():
                                 f"Ground Speed: {aircraft.get('gs', 'N/A')} knots\n"
                                 f"Track: {aircraft.get('track', 'N/A')}"
                             )
+                        send_email_alert(gatewayAddress, "WATCHLIST ALERT!", message)
 
-                        status_code = send_telegram_alert(message)
-                        if status_code == 200:
-                            message_lines = message.split('\n')[:3]
-                            for line in message_lines:
-                                print(line)
-                        else:
-                            print(f"Failed to send watchlist alert. Status Code: {status_code}")
+        if int(time.time()) > (LAST_SENT_HEALTH_CHECK + 10800):
+            print("Sending Health Check")
+            pid = int(os.getpid())
+            now = time.time()
+            # Using datetime
+            datetime_object = datetime.datetime.fromtimestamp(now)
+            print("Datetime object:", datetime_object)
 
+            now_local = datetime.datetime.now(pytz.timezone('America/New_York')) # Current time in New York
+
+            aircraft_count = len(aircraft_data)
+            healthCheckMessage = (f"Health Check Alert \n Port : {pid}\n"
+                            f"Time (Epoch Sec) : {now}\n"
+                            f"Time (Formmatted EST) : {now_local} \n"
+                            f"Aircraft Currently Tracking : {aircraft_count}\n")
+            send_email_alert(healthCheckEmail, "Health Check Alert!", healthCheckMessage)
         time.sleep(30)
 
 
