@@ -91,7 +91,7 @@ def load_csv_data(filename):
 def get_weather_data(latitude: float, longitude: float) -> dict:
     """Get current weather data from OpenWeatherMap API"""
     # You'll need to get an API key from OpenWeatherMap and set it here
-    API_KEY = "c038127b761f7ae6e713c24bdb753cbf "
+    API_KEY = openWeatherApiKey
     url = f"https://api.openweathermap.org/data/2.5/weather?lat={latitude}&lon={longitude}&appid={API_KEY}&units=metric"
     
     try:
