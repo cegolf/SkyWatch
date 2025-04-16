@@ -1,2 +1,6 @@
 emailToSMSConfig.py
 logs.txt
+__pycache__
+*.db
+*.out
+*.log
