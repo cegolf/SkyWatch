@@ -6,10 +6,18 @@ import smtplib
 from email.message import EmailMessage
 from emailToSMSConfig import senderEmail, gatewayAddress, appKey, healthCheckEmail, openWeatherApiKey
 import os
-import datetime
 import pytz
 from aircraft_db import AircraftDatabase
 import json
+import psutil  # You'll need to install this package
+import logging
+from datetime import datetime, timedelta
+import signal
+from collections import deque
+import sys
+
+# Global variables to track start time
+program_start_time = None
 
 # Enter in your Bot Token and the Chat ID of the chat you want the alerts sent to.
 TELEGRAM_BOT_TOKEN = ""
@@ -28,10 +36,98 @@ SQUAWK_MEANINGS = {
     "6400": "NORAD",
     "7777": "Millitary intercept",
     "0000": "discrete VFR operations",
-    "1277": "Search & Rescue",
-    '8698': "Chris's Birthday Squawk!!",
-    '0331': "Yuki's Birthday Squawk!!"
+    "1277": "Search & Rescue"
 }
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    filename='skywatch.log'
+)
+logger = logging.getLogger('skywatch')
+
+# Constants
+HEALTH_CHECK_INTERVAL = 3600  # 1 hour in seconds
+
+def send_health_check(db,subject_prefix="SkyWatch Health Check Report", include_startup_info=False):
+    """Send a detailed health check email with system and application statistics"""
+    # print("Sending Health Check...")
+    try:
+        pid = os.getpid()
+        process = psutil.Process(pid)
+        
+        # System stats
+        cpu_percent = psutil.cpu_percent()
+        memory_info = process.memory_info()
+        memory_percent = process.memory_percent()
+        
+        # Time information - Fix the timezone issue
+        now = time.time()
+        local_tz = pytz.timezone('America/New_York')
+        now_local = datetime.now(local_tz)
+        
+        # Make start_time timezone-aware by localizing it to the same timezone
+        start_time_naive = datetime.fromtimestamp(process.create_time())
+        start_time = local_tz.localize(start_time_naive)
+        
+        # Now both are timezone-aware, subtraction works
+        uptime = now_local - start_time
+        
+        # Application stats
+        aircraft_data = get_aircraft_data()
+        aircraft_count = len(aircraft_data)
+        
+        # Database stats
+        recent_sightings = db.get_sightings(limit=1000)
+        unique_aircraft = len(set(s['hex_code'] for s in recent_sightings))
+        stats = db.get_database_stats()
+        
+        # # Alert statistics
+        # watchlist_alerts = len(watchlist_alert_history)
+        # squawk_alerts = len(squawk_alert_history)
+        
+        # Format email message
+        healthCheckMessage = (
+            f"{subject_prefix}\n"
+            f"{'=' * len(subject_prefix)}\n\n"
+            f"Time: {now_local}\n"
+            f"Process ID: {pid}\n"
+            f"Uptime: {uptime}\n\n"
+        )
+        
+        if include_startup_info:
+            healthCheckMessage += (
+                f"Startup Information:\n"
+                f"  Python Version: {sys.version.split()[0]}\n"
+                f"  Host: {os.uname().nodename}\n"
+                f"  Working Directory: {os.getcwd()}\n\n"
+            )
+        
+        healthCheckMessage += (
+            f"System Resources:\n"
+            f"  CPU Usage: {cpu_percent}%\n"
+            f"  Memory Usage: {memory_info.rss / (1024 * 1024):.2f} MB ({memory_percent:.2f}%)\n\n"
+            f"Aircraft Statistics:\n"
+            f"  Aircraft Currently Tracking: {aircraft_count}\n"
+            f"  Unique Aircraft Spotted (last 1000 records): {unique_aircraft}\n\n"
+            # f"Alert Statistics (last 24 hours):\n"
+            # f"  Watchlist Alerts: {watchlist_alerts}\n"
+            # f"  Squawk Alerts: {squawk_alerts}\n\n"
+            f"Database Statistics:\n"
+            f"  Current sightings: {stats['aircraft_sightings_count']}\n"
+            f"  Archived sightings: {stats['archived_aircraft_sightings_count']}\n"
+            f"  Database size: {stats['database_size_mb']:.2f} MB\n"
+        )
+        
+        send_email_alert(healthCheckEmail, subject_prefix, healthCheckMessage)
+        logger.info("Health check email sent successfully")
+        
+        # Update the last health check timestamp
+        global LAST_SENT_HEALTH_CHECK
+        LAST_SENT_HEALTH_CHECK = int(time.time())
+        
+    except Exception as e:
+        # print(f"exception : {e}")
+        logger.error(f"Failed to send health check email: {str(e)}")
 
 
 def send_email_alert(email, subject, content):
@@ -59,16 +155,6 @@ def load_watchlist():
                 label = parts[1].strip()
                 watchlist[hex_code] = label
     return watchlist
-
-
-def send_telegram_alert(message):
-    telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    params = {
-        'chat_id': TELEGRAM_CHAT_ID,
-        'text': message,
-    }
-    response = requests.get(telegram_url, params=params)
-    return response.status_code
 
 
 def get_aircraft_data():
@@ -107,10 +193,39 @@ def get_weather_data(latitude: float, longitude: float) -> dict:
             'pressure': data['main']['pressure']
         }
     except Exception as e:
-        print(f"Error fetching weather data: {e}")
+        logger.error(f"Error fetching weather data: {e}")
         return {}
 
+
+
+
+def clean_shutdown():
+    """Perform cleanup operations before shutting down"""
+    logger.info("Performing clean shutdown...")
+    
+    # Close database connections
+    try:
+        # Your database cleanup code here
+        # db.close_connection()
+        logger.info("Database connections closed")
+    except Exception as e:
+        logger.error(f"Error during database cleanup: {str(e)}")
+    
+    # Any other cleanup operations
+    logger.info("Cleanup completed")
+
+
+
 def main():
+    # Log program start
+    logger.info(f"SkyWatch program started on PID : {os.getpid()} and process {psutil.Process(os.getpid())}")
+    global program_start_time
+    program_start_time = datetime.now()
+    
+    # Register signal handlers
+    signal.signal(signal.SIGINT, handle_exit_signal)
+    signal.signal(signal.SIGTERM, handle_exit_signal)
+    signal.signal(signal.SIGHUP, handle_exit_signal)
     squawk_alert_history = {}
     watchlist_alert_history = {}
     csv_files = ["plane-alert-civ-images.csv", "plane-alert-mil-images.csv", "plane-alert-gov-images.csv"]
@@ -124,21 +239,32 @@ def main():
     CLEANUP_INTERVAL = 86400  # 24 hours in seconds
     ARCHIVE_DAYS = 30  # Archive records older than 30 days
 
+    # Initialize LAST_SENT_HEALTH_CHECK to trigger immediate health check
+    global LAST_SENT_HEALTH_CHECK
+    # Setting to 0 ensures the health check condition will be true immediately
+    LAST_SENT_HEALTH_CHECK = 0  
+
     for filename in csv_files:
         csv_data.update(load_csv_data(filename))
 
     watchlist = load_watchlist()
+    
+    # Send startup health check
+    # Send startup health check
+    send_health_check(db, "SkyWatch Program Started", include_startup_info=True)
 
     while True:
         current_time = int(time.time())
         
+        # Rest of your code...
+        
         # Run cleanup and archiving every 24 hours
         if current_time > (LAST_CLEANUP + CLEANUP_INTERVAL):
-            print("Running database cleanup and archiving...")
+            logger.info("Running database cleanup and archiving...")
             try:
                 # Backup database before cleanup
                 backup_path = db.backup_database()
-                print(f"Database backed up to: {backup_path}")
+                logger.info(f"Database backed up to: {backup_path}")
                 
                 # Archive old records
                 db.archive_old_records(days_old=ARCHIVE_DAYS)
@@ -148,14 +274,14 @@ def main():
                 
                 # Get and print database stats
                 stats = db.get_database_stats()
-                print("\nDatabase Statistics:")
-                print(f"Current sightings: {stats['aircraft_sightings_count']}")
-                print(f"Archived sightings: {stats['archived_aircraft_sightings_count']}")
-                print(f"Database size: {stats['database_size_mb']:.2f} MB")
+                logger.info("\nDatabase Statistics:")
+                logger.info(f"Current sightings: {stats['aircraft_sightings_count']}")
+                logger.info(f"Archived sightings: {stats['archived_aircraft_sightings_count']}")
+                logger.info(f"Database size: {stats['database_size_mb']:.2f} MB")
                 
                 LAST_CLEANUP = current_time
             except Exception as e:
-                print(f"Error during cleanup: {e}")
+                logger.info(f"Error during cleanup: {e}")
                 # Send alert about cleanup failure
                 error_message = f"Database cleanup failed: {str(e)}"
                 send_email_alert(healthCheckEmail, "Database Cleanup Error", error_message)
@@ -183,7 +309,7 @@ def main():
             # Alert on specific squawk codes
             if squawk in SQUAWK_MEANINGS and (
                     hex_code not in squawk_alert_history or time.time() - squawk_alert_history[hex_code] >= 3600):
-                print("SQUAK MATCH")
+                logger.info("SQUAK MATCH")
                 squawk_alert_history[hex_code] = time.time()
                 squawk_meaning = SQUAWK_MEANINGS[squawk]
 
@@ -236,13 +362,6 @@ def main():
                                     f"Track: {aircraft.get('track', 'N/A')}"
                                 )
                             send_email_sms(message)
-                            # status_code = send_telegram_alert(message)
-                            # if status_code == 200:
-                            #     message_lines = message.split('\n')[:3]
-                            #     for line in message_lines:
-                            #         print(line)
-                            # else:
-                            #     print(f"Failed to send watchlist alert. Status Code: {status_code}")
                 elif hex_code == entry or flight == entry:
                     if hex_code not in watchlist_alert_history or time.time() - watchlist_alert_history[hex_code] >= 3600:
                         watchlist_alert_history[hex_code] = time.time()
@@ -272,30 +391,70 @@ def main():
                         send_email_alert(gatewayAddress, "WATCHLIST ALERT!", message)
 
         if current_time > (LAST_SENT_HEALTH_CHECK + 10800):
-            print("Sending Health Check")
-            pid = int(os.getpid())
-            now = time.time()
-            datetime_object = datetime.datetime.fromtimestamp(now)
-            now_local = datetime.datetime.now(pytz.timezone('America/New_York'))
-            aircraft_count = len(aircraft_data)
-            
-            # Get recent sightings count and database stats
-            recent_sightings = db.get_sightings(limit=1000)
-            unique_aircraft = len(set(s['hex_code'] for s in recent_sightings))
-            stats = db.get_database_stats()
-            
-            healthCheckMessage = (f"Health Check Alert \n Port : {pid}\n"
-                            f"Time (Epoch Sec) : {now}\n"
-                            f"Time (Formmatted EST) : {now_local} \n"
-                            f"Aircraft Currently Tracking : {aircraft_count}\n"
-                            f"Unique Aircraft Spotted (Last 1000 records): {unique_aircraft}\n"
-                            f"Database Statistics:\n"
-                            f"  Current sightings: {stats['aircraft_sightings_count']}\n"
-                            f"  Archived sightings: {stats['archived_aircraft_sightings_count']}\n"
-                            f"  Database size: {stats['database_size_mb']:.2f} MB\n")
-            send_email_alert(healthCheckEmail, "Health Check Alert!", healthCheckMessage)
+            logger.info("Sending health check")
+            send_health_check(db)
         time.sleep(30)
+        # End Main Methode
 
+
+
+
+
+def get_last_log_lines(log_file, num_lines=10):
+    """Get the last N lines from a log file"""
+    try:
+        # Method that works for both small and large files
+        with open(log_file, 'r') as file:
+            # Use a deque with maxlen to efficiently get the last N lines
+            from collections import deque
+            last_lines = deque(maxlen=num_lines)
+            
+            for line in file:
+                last_lines.append(line.strip())
+            
+            return '\n'.join(last_lines)
+    except Exception as e:
+        return f"Error reading log file: {str(e)}"
+def handle_exit_signal(sig, frame):
+    """Handle termination signals and log program exit information"""
+    signal_names = {
+        signal.SIGINT: "SIGINT (Ctrl+C)",
+        signal.SIGTERM: "SIGTERM",
+        # signal.SIGHUP: "SIGHUP",
+    }
+    
+    signal_name = signal_names.get(sig, f"Signal {sig}")
+    
+    # Calculate uptime
+    now = datetime.now()
+    uptime = now - program_start_time
+    
+    # Log the termination
+    logger.info(f"Program terminated by {signal_name}. Total uptime: {uptime}")
+
+    # Get the last 10 log lines
+    last_logs = get_last_log_lines('skywatch.log', 10)
+    
+    # Optional: Send an email notification about the termination
+    try:
+        termination_message = (
+            f"SkyWatch Terminated\n"
+            f"==================\n\n"
+            f"Time: {now}\n"
+            f"Termination Signal: {signal_name}\n"
+            f"Total Uptime: {uptime}\n"
+            f"Last 10 log entries:\n"
+            f"------------------\n"
+            f"{last_logs}"
+        )
+        send_email_alert(healthCheckEmail, "SkyWatch Terminated", termination_message)
+        logger.info("Termination notification email sent")
+        clean_shutdown()
+    except Exception as e:
+        logger.error(f"Failed to send termination notification: {str(e)}")
+    
+    # Exit the program
+    sys.exit(0)
 
 if __name__ == "__main__":
     main()
