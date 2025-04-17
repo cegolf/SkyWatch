@@ -23,7 +23,7 @@ program_start_time = None
 TELEGRAM_BOT_TOKEN = ""
 TELEGRAM_CHAT_ID = ""
 
-LAST_SENT_HEALTH_CHECK = int(time.time())
+LAST_SENT_HEALTH_CHECK = 0
 
 MILITARY_CALLSIGNS = [
     "PAT",
@@ -243,7 +243,7 @@ def main():
     
     # Track last cleanup time
     LAST_CLEANUP = int(time.time())
-    CLEANUP_INTERVAL = 86400  # 24 hours in seconds
+    CLEANUP_INTERVAL = 3600  # 24 hours in seconds
     ARCHIVE_DAYS = 30  # Archive records older than 30 days
 
     # Initialize LAST_SENT_HEALTH_CHECK to trigger immediate health check
@@ -300,7 +300,7 @@ def main():
         if current_time % 300 == 0:  # Every 5 minutes
             logger.info("Recording weather data...")
             # Get weather data for your location (you'll need to set these coordinates)
-            weather_data = get_weather_data(40.7128, -74.0060)  # Example: New York City coordinates
+            weather_data = get_weather_data(40.121026, -82.949669) 
             if weather_data:
                 db.record_weather(weather_data)
         # Refactored loop
@@ -394,6 +394,8 @@ def create_alert_message(hex_code, aircraft, alert_type, alert_detail, context=N
         f"Altitude: {aircraft.get('alt_geom', 'N/A')} ft\n"
         f"Ground Speed: {aircraft.get('gs', 'N/A')} knots\n"
         f"Track: {aircraft.get('track', 'N/A')}"
+        f"\nLatitude: {aircraft.get('lat', 'N/A')}\n"
+        f"Longitude: {aircraft.get('lon', 'N/A')}\n"
     )
     if context:
         base_message += (
