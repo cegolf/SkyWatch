@@ -25,6 +25,13 @@ TELEGRAM_CHAT_ID = ""
 
 LAST_SENT_HEALTH_CHECK = int(time.time())
 
+MILITARY_CALLSIGNS = [
+    "PAT",
+    "ANVIL",
+    "RCH",
+    "TRACTR"
+]
+
 # Add or remove these as needed
 SQUAWK_MEANINGS = {
     "7500": "Aircraft Hijacking",
@@ -119,7 +126,7 @@ def send_health_check(db,subject_prefix="SkyWatch Health Check Report", include_
         )
         
         send_email_alert(healthCheckEmail, subject_prefix, healthCheckMessage)
-        logger.info("Health check email sent successfully")
+        logger.info(f"Health check email sent successfully with data {healthCheckMessage}")
         
         # Update the last health check timestamp
         global LAST_SENT_HEALTH_CHECK
@@ -225,7 +232,7 @@ def main():
     # Register signal handlers
     signal.signal(signal.SIGINT, handle_exit_signal)
     signal.signal(signal.SIGTERM, handle_exit_signal)
-    signal.signal(signal.SIGHUP, handle_exit_signal)
+    # signal.signal(signal.SIGHUP, handle_exit_signal)
     squawk_alert_history = {}
     watchlist_alert_history = {}
     csv_files = ["plane-alert-civ-images.csv", "plane-alert-mil-images.csv", "plane-alert-gov-images.csv"]
@@ -254,6 +261,7 @@ def main():
     send_health_check(db, "SkyWatch Program Started", include_startup_info=True)
 
     while True:
+        logger.info("Main loop running...")
         current_time = int(time.time())
         
         # Rest of your code...
@@ -290,15 +298,31 @@ def main():
         
         # Record weather data periodically (every 5 minutes)
         if current_time % 300 == 0:  # Every 5 minutes
+            logger.info("Recording weather data...")
             # Get weather data for your location (you'll need to set these coordinates)
             weather_data = get_weather_data(40.7128, -74.0060)  # Example: New York City coordinates
             if weather_data:
                 db.record_weather(weather_data)
-
+        # Refactored loop
+        logger.info(f"Currently tracking {len(aircraft_data)} aircraft. Processing aircraft data...")
         for aircraft in aircraft_data:
+            logger.debug(f"Processing aircraft: {aircraft}")
             hex_code = aircraft['hex'].upper()
             flight = aircraft.get('flight', '').strip().upper()
             squawk = aircraft.get('squawk', '')
+
+            # Check for military callsign
+            for mil_callsign in MILITARY_CALLSIGNS:
+                if flight.startswith(mil_callsign):
+                    logMessage = create_alert_message(
+                        hex_code, 
+                        aircraft, 
+                        "Military Callsign", 
+                        f"Flight: {flight}", 
+                        csv_data.get(hex_code)
+                    )
+                    logger.info(f"Possible military callsign detected: {logMessage}")
+                    break
             
             # Record the aircraft sighting
             aircraft_record = aircraft.copy()
@@ -312,22 +336,14 @@ def main():
                 logger.info("SQUAK MATCH")
                 squawk_alert_history[hex_code] = time.time()
                 squawk_meaning = SQUAWK_MEANINGS[squawk]
-
-                if hex_code in csv_data:
-                    context = csv_data[hex_code]
-                    message = (
-                        f"Squawk Alert!\nHex: {hex_code}\nSquawk: {squawk} ({squawk_meaning})\n"
-                        f"Flight: {aircraft.get('flight', 'N/A')}\nAltitude: {aircraft.get('alt_geom', 'N/A')} ft\n"
-                        f"Ground Speed: {aircraft.get('gs', 'N/A')} knots\nTrack: {aircraft.get('track', 'N/A')}\n"
-                        f"Operator: {context.get('$Operator', 'N/A')}\nType: {context.get('$Type', 'N/A')}\n"
-                        f"Image: {context.get('#ImageLink', 'N/A')}"
-                    )
-                else:
-                    message = (
-                        f"Squawk Alert!\nHex: {hex_code}\nSquawk: {squawk} ({squawk_meaning})\n"
-                        f"Flight: {aircraft.get('flight', 'N/A')}\nAltitude: {aircraft.get('alt_geom', 'N/A')} ft\n"
-                        f"Ground Speed: {aircraft.get('gs', 'N/A')} knots\nTrack: {aircraft.get('track', 'N/A')}"
-                    )
+                context = csv_data.get(hex_code)
+                message = create_alert_message(
+                    hex_code, 
+                    aircraft, 
+                    "Squawk", 
+                    f"Squawk: {squawk} ({squawk_meaning})", 
+                    context
+                )
                 send_email_alert(gatewayAddress, "SQUAWK ALERT!", message)
 
             # Alert on items in the watchlist
@@ -337,58 +353,28 @@ def main():
                         if (hex_code not in watchlist_alert_history or
                                 time.time() - watchlist_alert_history[hex_code] >= 3600):
                             watchlist_alert_history[hex_code] = time.time()
-                            if hex_code in csv_data:
-                                context = csv_data[hex_code]
-                                message = (
-                                    f"Watchlist Alert!\n"
-                                    f"Hex: {hex_code}\n"
-                                    f"Label: {watchlist[entry]}\n"
-                                    f"Flight: {aircraft.get('flight', 'N/A')}\n"
-                                    f"Altitude: {aircraft.get('alt_geom', 'N/A')} ft\n"
-                                    f"Ground Speed: {aircraft.get('gs', 'N/A')} knots\n"
-                                    f"Track: {aircraft.get('track', 'N/A')}\n"
-                                    f"Operator: {context.get('$Operator', 'N/A')}\n"
-                                    f"Type: {context.get('$Type', 'N/A')}\n"
-                                    f"Image: {context.get('#ImageLink', 'N/A')}"
-                                )
-                            else:
-                                message = (
-                                    f"Watchlist Alert!\n"
-                                    f"Hex: {hex_code}\n"
-                                    f"Label: {watchlist[entry]}\n"
-                                    f"Flight: {aircraft.get('flight', 'N/A')}\n"
-                                    f"Altitude: {aircraft.get('alt_geom', 'N/A')} ft\n"
-                                    f"Ground Speed: {aircraft.get('gs', 'N/A')} knots\n"
-                                    f"Track: {aircraft.get('track', 'N/A')}"
-                                )
+                            context = csv_data.get(hex_code)
+                            message = create_alert_message(
+                                hex_code, 
+                                aircraft, 
+                                "Watchlist", 
+                                f"Label: {watchlist[entry]}", 
+                                context
+                            )
                             send_email_sms(message)
                 elif hex_code == entry or flight == entry:
-                    if hex_code not in watchlist_alert_history or time.time() - watchlist_alert_history[hex_code] >= 3600:
+                    if (hex_code not in watchlist_alert_history or 
+                            time.time() - watchlist_alert_history[hex_code] >= 3600):
                         watchlist_alert_history[hex_code] = time.time()
-                        if hex_code in csv_data:
-                            context = csv_data[hex_code]
-                            message = (
-                                f"Watchlist Alert!\n"
-                                f"Hex: {hex_code}\n"
-                                f"Label: {watchlist[entry]}\n"
-                                f"Flight: {aircraft.get('flight', 'N/A')}\n"
-                                f"Altitude: {aircraft.get('alt_geom', 'N/A')} ft\n"
-                                f"Ground Speed: {aircraft.get('gs', 'N/A')} knots\n"
-                                f"Track: {aircraft.get('track', 'N/A')}\n"
-                                f"Operator: {context.get('$Operator', 'N/A')}\n"
-                                f"Type: {context.get('$Type', 'N/A')}\n"
-                                f"Image: {context.get('#ImageLink', 'N/A')}"
-                            )
-                        else:
-                            message = (
-                                f"Watchlist Alert!\nHex: {hex_code}\n"
-                                f"Label: {watchlist[entry]}\n"
-                                f"Flight: {aircraft.get('flight', 'N/A')}\n"
-                                f"Altitude: {aircraft.get('alt_geom', 'N/A')} ft\n"
-                                f"Ground Speed: {aircraft.get('gs', 'N/A')} knots\n"
-                                f"Track: {aircraft.get('track', 'N/A')}"
-                            )
-                        send_email_alert(gatewayAddress, "WATCHLIST ALERT!", message)
+                        context = csv_data.get(hex_code)
+                        message = create_alert_message(
+                            hex_code, 
+                            aircraft, 
+                            "Watchlist", 
+                            f"Label: {watchlist[entry]}", 
+                            context
+                        )
+                        send_email_sms(message)
 
         if current_time > (LAST_SENT_HEALTH_CHECK + 10800):
             logger.info("Sending health check")
@@ -398,6 +384,24 @@ def main():
 
 
 
+def create_alert_message(hex_code, aircraft, alert_type, alert_detail, context=None):
+    """Generate alert message for squawk or watchlist alerts."""
+    base_message = (
+        f"{alert_type} Alert!\n"
+        f"Hex: {hex_code}\n"
+        f"{alert_detail}\n"
+        f"Flight: {aircraft.get('flight', 'N/A')}\n"
+        f"Altitude: {aircraft.get('alt_geom', 'N/A')} ft\n"
+        f"Ground Speed: {aircraft.get('gs', 'N/A')} knots\n"
+        f"Track: {aircraft.get('track', 'N/A')}"
+    )
+    if context:
+        base_message += (
+            f"\nOperator: {context.get('$Operator', 'N/A')}\n"
+            f"Type: {context.get('$Type', 'N/A')}\n"
+            f"Image: {context.get('#ImageLink', 'N/A')}"
+        )
+    return base_message
 
 
 def get_last_log_lines(log_file, num_lines=10):
