@@ -1,4 +1,4 @@
-emailToSMSConfig.py
+env_vars_config.py
 logs.txt
 __pycache__
 *.db
