@@ -102,16 +102,14 @@ def main():
                 aircraft_record.update(csv_data[hex_code])
             db.record_sighting(aircraft_record)
 
-
             check_squak(logger, hex_code, aircraft, squawk, csv_data)
 
             check_watchlist(flight,csv_data, hex_code, aircraft)
 
-
-
         if current_time > (LAST_SENT_HEALTH_CHECK + 10800):
             logger.info("Sending health check")
             send_health_check(logger, db)
+            LAST_SENT_HEALTH_CHECK = current_time
         time.sleep(30)
         # End Main Methode
 
