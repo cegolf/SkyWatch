@@ -148,7 +148,7 @@ def handle_exit_signal(sig, frame):
         )
         send_email_alert(healthCheckEmail, "SkyWatch Terminated", termination_message)
         logger.info("Termination notification email sent")
-        clean_shutdown()
+        clean_shutdown(logger)
     except Exception as e:
         logger.error(f"Failed to send termination notification: {str(e)}")
     

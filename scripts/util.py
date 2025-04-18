@@ -29,7 +29,7 @@ def load_csv_data(filename):
             csv_data[hex_code] = row
     return csv_data
 
-def clean_shutdown():
+def clean_shutdown(logger):
     """Perform cleanup operations before shutting down"""
     logger.info("Performing clean shutdown...")
     
