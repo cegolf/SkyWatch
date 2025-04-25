@@ -19,8 +19,6 @@ from plane_checks import check_possible_military_plane, check_squak, check_watch
 from logging_util import get_last_log_lines
 program_start_time = None
 
-LAST_SENT_HEALTH_CHECK = 0
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,7 +51,6 @@ def main():
     ARCHIVE_DAYS = 30  # Archive records older than 30 days
 
     # Initialize LAST_SENT_HEALTH_CHECK to trigger immediate health check
-    global LAST_SENT_HEALTH_CHECK
     # Setting to 0 ensures the health check condition will be true immediately
     LAST_SENT_HEALTH_CHECK = 0  
 
@@ -66,7 +63,7 @@ def main():
     send_health_check(logger,db, "SkyWatch Program Started", include_startup_info=True)
 
     while True:
-        logger.debug("Main loop running...")
+        logger.info("Main loop running...")
         current_time = int(time.time())
         
         # Rest of your code...
@@ -105,8 +102,7 @@ def main():
             check_squak(logger, hex_code, aircraft, squawk, csv_data)
 
             check_watchlist(flight,csv_data, hex_code, aircraft)
-
-        if current_time > (LAST_SENT_HEALTH_CHECK + 10800):
+        if current_time > (LAST_SENT_HEALTH_CHECK + 3600):
             logger.info("Sending health check")
             send_health_check(logger, db)
             LAST_SENT_HEALTH_CHECK = current_time
