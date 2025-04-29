@@ -17,6 +17,7 @@ from alerting import send_health_check, send_email_alert
 from util import load_watchlist, get_aircraft_data, get_weather_data, load_csv_data, clean_shutdown, clean_up_db
 from plane_checks import check_possible_military_plane, check_squak, check_watchlist
 from logging_util import get_last_log_lines
+import socket
 program_start_time = None
 
 
@@ -102,7 +103,7 @@ def main():
             check_squak(logger, hex_code, aircraft, squawk, csv_data)
 
             check_watchlist(flight,csv_data, hex_code, aircraft)
-        if current_time > (LAST_SENT_HEALTH_CHECK + 3600):
+        if (LAST_SENT_HEALTH_CHECK !=0) and (current_time > (LAST_SENT_HEALTH_CHECK + 3600)):
             logger.info("Sending health check")
             send_health_check(logger, db)
             LAST_SENT_HEALTH_CHECK = current_time
@@ -118,13 +119,33 @@ def handle_exit_signal(sig, frame):
     
     signal_name = signal_names.get(sig, f"Signal {sig}")
     
+    # Get the user and IP address
+    user = os.getenv("USER", "Unknown User")
+    user = os.getenv("USER", "Unknown User")
+    try:
+        logger.info(f"User: {user}")
+        logger.info(f"SSH client details: {os.getenv('SSH_CLIENT')}")
+        logger.info(f"SSH connection details: {os.getenv('SSH_CONNECTION')}")
+        # Check for SSH connection details
+        ssh_connection = os.getenv("SSH_CLIENT") or os.getenv("SSH_CONNECTION")
+        logger.info(f"SSH connection details: {ssh_connection}")
+        if ssh_connection:
+            ip_address = ssh_connection.split()[0]  # Extract the IP address from the SSH connection string
+        else:
+            # Fallback to hostname resolution if no SSH connection is found
+            hostname = socket.gethostname()
+            ip_address = socket.gethostbyname(hostname)
+    except Exception as e:
+        ip_address = f"Unknown IP (Error: {str(e)})"
+
+
     # Calculate uptime
     now = datetime.now()
     uptime = now - program_start_time
     
     # Log the termination
     logger.info(f"Program terminated by {signal_name}. Total uptime: {uptime}")
-
+    logger.info(f"Termination initiated by user: {user}, IP address: {ip_address}")
     # Get the last 10 log lines
     last_logs = get_last_log_lines('skywatch.log', 10)
     
@@ -136,6 +157,8 @@ def handle_exit_signal(sig, frame):
             f"Time: {now}\n"
             f"Termination Signal: {signal_name}\n"
             f"Total Uptime: {uptime}\n"
+            f"Initiated by User: {user}\n"
+            f"IP Address: {ip_address}\n"
             f"Last 10 log entries:\n"
             f"------------------\n"
             f"{last_logs}"
@@ -145,9 +168,13 @@ def handle_exit_signal(sig, frame):
         clean_shutdown(logger)
     except Exception as e:
         logger.error(f"Failed to send termination notification: {str(e)}")
-    
-    # Exit the program
-    sys.exit(0)
+    finally:
+        # Exit the program
+        sys.exit(0)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"Unhandled exception: {str(e)}", exc_info=True)
+        sys.exit(1)
