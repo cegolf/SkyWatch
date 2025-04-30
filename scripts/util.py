@@ -1,8 +1,7 @@
 import csv
 import logging
 import requests
-from env_vars_config import healthCheckEmail
-
+from env_vars_config import healthCheckEmail, openWeatherApiKey
 def load_watchlist():
     watchlist = {}
     with open("../watchlist.txt", "r") as file:

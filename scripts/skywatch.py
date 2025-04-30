@@ -10,7 +10,7 @@ import signal
 import sys
 from datetime import datetime, timedelta
 from collections import deque
-from env_vars_config import senderEmail, gatewayAddress, appKey, healthCheckEmail, openWeatherApiKey, csv_data_base_path
+from env_vars_config import senderEmail, gatewayAddress, appKey, healthCheckEmail, csv_data_base_path
 from aircraft_db import AircraftDatabase
 from constants import MILITARY_CALLSIGNS, SQUAWK_MEANINGS
 from alerting import send_health_check, send_email_alert
@@ -106,7 +106,7 @@ def main():
     send_health_check(logger,db, "SkyWatch Program Started", include_startup_info=True)
 
     while True:
-        logger.info("Main loop running...")
+        logger.debug("Main loop running...")
         current_time = int(time.time())
         
         # Rest of your code...
