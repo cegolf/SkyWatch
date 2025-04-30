@@ -18,6 +18,8 @@ from util import load_watchlist, get_aircraft_data, get_weather_data, load_csv_d
 from plane_checks import check_possible_military_plane, check_squak, check_watchlist
 from logging_util import get_last_log_lines
 import socket
+import shutil
+from logging.handlers import TimedRotatingFileHandler
 program_start_time = None
 
 
@@ -27,6 +29,46 @@ logging.basicConfig(
     filename='skywatch.log'
 )
 logger = logging.getLogger('skywatch')
+
+def configure_logger():
+    """Configure the logger to use a TimedRotatingFileHandler."""
+    log_file = 'skywatch.log'
+    archive_folder = 'log_archive'  # Folder to store archived logs
+    os.makedirs(archive_folder, exist_ok=True)  # Ensure the folder exists
+
+    # Create a TimedRotatingFileHandler
+    handler = TimedRotatingFileHandler(
+        log_file,
+        when='midnight',  # Rotate logs at midnight
+        interval=1,       # Rotate every 1 day
+        backupCount=30    # Keep the last 30 log files
+    )
+    handler.suffix = "%Y-%m-%d"  # Add date suffix to archived logs
+    handler.extMatch = r"^\d{4}-\d{2}-\d{2}$"  # Match the date format for old logs
+
+    # Move old logs to the archive folder
+    def rename_log_file(source, dest):
+        dest = os.path.join(archive_folder, os.path.basename(dest))
+        shutil.move(source, dest)
+
+    handler.namer = rename_log_file
+
+    # Configure the logger
+    logger = logging.getLogger('skywatch')
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+
+    # Remove existing handlers and add the new one
+    for existing_handler in logger.handlers[:]:
+        logger.removeHandler(existing_handler)
+        existing_handler.close()
+    logger.addHandler(handler)
+
+    return logger
+
+# Replace the global logger configuration
+logger = configure_logger()
 
 
 def main():
@@ -103,7 +145,7 @@ def main():
             check_squak(logger, hex_code, aircraft, squawk, csv_data)
 
             check_watchlist(flight,csv_data, hex_code, aircraft)
-        if (LAST_SENT_HEALTH_CHECK !=0) and (current_time > (LAST_SENT_HEALTH_CHECK + 3600)):
+        if (current_time > (LAST_SENT_HEALTH_CHECK + 3600)):
             logger.info("Sending health check")
             send_health_check(logger, db)
             LAST_SENT_HEALTH_CHECK = current_time
