@@ -219,4 +219,21 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         logger.error(f"Unhandled exception: {str(e)}", exc_info=True)
+        last_logs = get_last_log_lines('skywatch.log', 10)
+        try:
+            termination_message = (
+                f"SkyWatch Down\n"
+                f"==================\n\n"
+                f"Last 10 log entries:\n"
+                f"------------------\n"
+                f"{last_logs}"
+                f"Error Stack: \n"
+                f"{str(e)}\n"
+                f"==================\n"
+                f"SkyWatch program terminated unexpectedly. Please check the logs for more details."
+            )
+            send_email_alert(healthCheckEmail, "SkyWatch Fatal error", termination_message)
+        except Exception as email_error:
+            logger.error(f"Failed to send error notification: {str(email_error)}")
+        clean_shutdown(logger)
         sys.exit(1)
