@@ -22,14 +22,6 @@ import shutil
 from logging.handlers import TimedRotatingFileHandler
 program_start_time = None
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    filename='skywatch.log'
-)
-logger = logging.getLogger('skywatch')
-
 def configure_logger():
     """Configure the logger to use a TimedRotatingFileHandler."""
     log_file = 'skywatch.log'
